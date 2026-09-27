@@ -1,13 +1,5 @@
 """
-Reproducible model-building script for the Housing Valuation assignment.
 
-In Google Colab:
-1. Upload train.csv into the working directory.
-2. Run this script.
-3. It creates:
-   - linear_regression_model.sav
-   - logistic_regression_model.sav
-   - model_metadata.sav
 """
 
 import json
