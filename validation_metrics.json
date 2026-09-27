@@ -1,0 +1,21 @@
+{
+  "linear_regression": {
+    "MAE_lakhs": 34.819930627356065,
+    "RMSE_lakhs": 74.63420330962703,
+    "R2": 0.7484076148229506
+  },
+  "logistic_regression": {
+    "accuracy": 0.887875,
+    "ROC_AUC": 0.9634223952654357,
+    "confusion_matrix": [
+      [
+        7342,
+        919
+      ],
+      [
+        875,
+        6864
+      ]
+    ]
+  }
+}
