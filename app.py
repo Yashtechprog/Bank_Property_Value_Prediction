@@ -67,30 +67,29 @@ meta = metadata_bundle["metadata"]
 ranges = metadata_bundle["numeric_ranges"]
 options = metadata_bundle["categorical_options"]
 
-st.title("🏠 Housing Price Prediction & Bank Underwriting Tool")
-st.caption(
-    "Academic predictive tool: estimates property value from property characteristics, "
-    "then calculates LTV and optional FOIR using user-entered lending inputs."
-)
 
-with st.expander("Model information", expanded=False):
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Training rows", f'{meta["training_rows"]:,}')
-    c2.metric("Linear validation R²", f'{meta["linear_validation_metrics"]["r2"]:.3f}')
-    c3.metric("Logistic validation ROC-AUC", f'{meta["logistic_validation_metrics"]["roc_auc"]:.3f}')
-    st.write(
-        f'Logistic target: property value ≥ ₹{meta["high_value_threshold_lakhs"]:.0f} lakh '
-        '(₹1 crore). This classification target is derived from the available property-value '
-        'data because the supplied datasets contain no borrower or loan-sanction outcome.'
-    )
+def _normalise_key(value):
+    """Normalise metadata names so R2/r2 and ROC_AUC/roc_auc both work."""
+    value = str(value).replace("²", "2")
+    return "".join(char.lower() for char in value if char.isalnum())
 
-st.subheader("1. Property details")
 
-with st.form("valuation_form"):
-    col1, col2, col3 = st.columns(3)
+def _read_nested_metric(metadata, section_names, metric_names):
+    """Read a metric while tolerating capitalization and punctuation differences."""
+    section_names = {_normalise_key(name) for name in section_names}
+    metric_names = {_normalise_key(name) for name in metric_names}
 
-    with col1:
-        city = st.selectbox("City", options["City"])
-        locality_type = st.selectbox("Locality type", options["Locality_Type"])
-        property_type = st.selectbox("Property type", options["Property_Type"])
-        furnishing = st.selectbox("Furnishing status", options["Furnishing_Status"])
+    section = {}
+    for key, value in metadata.items():
+        if _normalise_key(key) in section_names and isinstance(value, dict):
+            section = value
+            break
+
+    for key, value in section.items():
+        if _normalise_key(key) in metric_names:
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                return None
+    return None
+
