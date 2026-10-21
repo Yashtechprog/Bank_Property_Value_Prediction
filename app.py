@@ -1,95 +1,96 @@
-import streamlit as st
-import pandas as pd
-import joblib
+import json
+import math
+import re
 from pathlib import Path
 
+import joblib
+import numpy as np
+import pandas as pd
+import streamlit as st
+
+
+# ---------------------------------------------------------------------------
+# Page setup and robust helpers
+# ---------------------------------------------------------------------------
 st.set_page_config(
     page_title="Housing Valuation & Underwriting Tool",
     page_icon="🏠",
-    layout="wide"
+    layout="wide",
 )
 
 BASE_DIR = Path(__file__).resolve().parent
 
-def artifact_path(filename):
-    """Find a model file in the app folder or common subfolders."""
+
+def _normalise_key(value):
+    """Normalise key names so variants like ROC_AUC, roc-auc and ROC AUC match."""
+    return re.sub(r"[^a-z0-9]", "", str(value).lower().replace("²", "2"))
+
+
+def _get_ci(mapping, wanted_key, default=None):
+    """Case/punctuation-insensitive dictionary lookup."""
+    if not isinstance(mapping, dict):
+        return default
+    wanted = _normalise_key(wanted_key)
+    for key, value in mapping.items():
+        if _normalise_key(key) == wanted:
+            return value
+    return default
+
+
+def _find_section(obj, section_aliases):
+    """Find a nested dictionary section without assuming a fixed nesting level."""
+    aliases = {_normalise_key(x) for x in section_aliases}
+    if isinstance(obj, dict):
+        for key, value in obj.items():
+            if _normalise_key(key) in aliases and isinstance(value, dict):
+                return value
+        for value in obj.values():
+            found = _find_section(value, section_aliases)
+            if found is not None:
+                return found
+    elif isinstance(obj, (list, tuple)):
+        for value in obj:
+            found = _find_section(value, section_aliases)
+            if found is not None:
+                return found
+    return None
+
+
+def _find_scalar(obj, aliases):
+    """Recursively find a scalar field matching one of the supplied aliases."""
+    wanted = {_normalise_key(x) for x in aliases}
+    if isinstance(obj, dict):
+        for key, value in obj.items():
+            if _normalise_key(key) in wanted and not isinstance(value, (dict, list, tuple)):
+                try:
+                    number = float(value)
+                    if math.isfinite(number):
+                        return number
+                except (TypeError, ValueError):
+                    pass
+        for value in obj.values():
+            found = _find_scalar(value, aliases)
+            if found is not None:
+                return found
+    elif isinstance(obj, (list, tuple)):
+        for value in obj:
+            found = _find_scalar(value, aliases)
+            if found is not None:
+                return found
+    return None
+
+
+def _artifact_path(filename, required=True):
+    """Locate files beside app.py or inside common artifact folders."""
     candidates = [
         BASE_DIR / filename,
         BASE_DIR / "models" / filename,
         BASE_DIR / "artifacts" / filename,
     ]
-    for path in candidates:
-        if path.is_file():
-            return path
-    raise FileNotFoundError(
-        f"Could not find {filename}. Expected it in the repository root, "
-        f"models/, or artifacts/. App directory: {BASE_DIR}"
-    )
-
-@st.cache_resource
-def load_artifacts():
-    # Load the trained models. Both model files also contain the UI metadata,
-    # so the app can start even if model_metadata.sav was not committed.
-    linear_artifact = joblib.load(artifact_path("linear_regression_model.sav"))
-    logistic_artifact = joblib.load(artifact_path("logistic_regression_model.sav"))
-
-    metadata_artifact = linear_artifact.get("metadata")
-    if not isinstance(metadata_artifact, dict):
-        metadata_artifact = logistic_artifact.get("metadata")
-
-    # Backward-compatible fallback for older model files whose metadata is separate.
-    if not isinstance(metadata_artifact, dict):
-        try:
-            metadata_artifact = joblib.load(artifact_path("model_metadata.sav"))
-        except FileNotFoundError:
-            metadata_artifact = None
-
-    if not isinstance(metadata_artifact, dict):
-        raise RuntimeError(
-            "Could not load app metadata. Ensure the trained model files are the supplied "
-            "linear_regression_model.sav and logistic_regression_model.sav files."
-        )
-
-    required_keys = {"metadata", "numeric_ranges", "categorical_options"}
-    if not required_keys.issubset(metadata_artifact.keys()):
-        raise RuntimeError(
-            "The metadata inside the model file is incomplete. Re-upload the supplied model files."
-        )
-
-    return (
-        linear_artifact["model"],
-        logistic_artifact["model"],
-        metadata_artifact,
-    )
-
-linear_model, logistic_model, metadata_bundle = load_artifacts()
-meta = metadata_bundle["metadata"]
-ranges = metadata_bundle["numeric_ranges"]
-options = metadata_bundle["categorical_options"]
-
-
-def _normalise_key(value):
-    """Normalise metadata names so R2/r2 and ROC_AUC/roc_auc both work."""
-    value = str(value).replace("²", "2")
-    return "".join(char.lower() for char in value if char.isalnum())
-
-
-def _read_nested_metric(metadata, section_names, metric_names):
-    """Read a metric while tolerating capitalization and punctuation differences."""
-    section_names = {_normalise_key(name) for name in section_names}
-    metric_names = {_normalise_key(name) for name in metric_names}
-
-    section = {}
-    for key, value in metadata.items():
-        if _normalise_key(key) in section_names and isinstance(value, dict):
-            section = value
-            break
-
-    for key, value in section.items():
-        if _normalise_key(key) in metric_names:
-            try:
-                return float(value)
-            except (TypeError, ValueError):
-                return None
-    return None
-
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    if required:
+        checked = "\n".join(str(p) for p in candidates)
+        raise FileNotFoundError(
+            f"Required file '{filename}' was not found. Locations checked:\n{checked}"
